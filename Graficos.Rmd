@@ -194,7 +194,7 @@ matriz_confusionTeoFull
 ```{r}
 #Curva ROC con las 4 variables de la literatura pero con las 3 subvariables
 logist.pred.ROCR02Full <- prediction(predict_numeric02Full, test$diagnosis)
-
+# asjfansdfka
 logist.perf02Full <- performance(logist.pred.ROCR02Full, "tpr",
     "fpr")
 
