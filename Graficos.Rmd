@@ -1,0 +1,246 @@
+---
+title: ""
+date: "`r Sys.Date()`"
+output: 
+      html_document: default
+  # rmdformats::material:
+  #   highlight: kate
+---
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(kableExtra)
+library(ROCR)
+library(kknn)
+library(class)
+library(caret)
+library(leaps)
+
+biopsiasCancerMamario <- read_csv("C:/Users/Brandon/OneDrive/Escritorio/Estadistica actuarial II/biopsiasCancerMamario.csv") %>% select(-...33)
+biopsiasCancerMamario$area_mean <- as.numeric(biopsiasCancerMamario$area_mean)
+
+biopsiasCancerMamario$diagnosis <- biopsiasCancerMamario$diagnosis=="M"
+biopsiasCancerMamario <- biopsiasCancerMamario[,-c(10,23:32)]
+
+
+train <- biopsiasCancerMamario %>%
+    sample_frac(0.75)
+
+test <- biopsiasCancerMamario %>%
+    anti_join(train, by = "id")
+```
+
+
+```{r}
+regfit.bwd <- regsubsets(diagnosis ~ .-id, data = train, nvmax = 30, method = "forward")
+
+summary(regfit.bwd, all.best = TRUE)
+regfit.bwd
+```
+
+
+Se utilizan todas las variables para hacer el analisis con la base de entrenamiento (train).
+
+```{r}
+fit_rlFull <- glm(diagnosis ~.-id, data = train, family = "binomial" )
+summary(fit_rlFull, all.best=TRUE)
+```
+9Se hace la predición de los valores para la base de prueba (test)
+```{r}
+##Se predice para la base con todas las variables
+predict_numeric <- predict(fit_rlFull, newdata= test, type = "response")
+```
+
+Se pasa esta predicción a valores numéricos y además se crea la matriz de confusión de la regresión utilizando todas las variables.
+```{r}
+predict_01 <- as.numeric(predict_numeric >= 0.5)
+
+matriz_confusionrlFull <- table(test$diagnosis, predict_01)
+
+colnames(matriz_confusionrlFull) <- c("N", "P")
+rownames(matriz_confusionrlFull) <- c("N", "P")
+
+matriz_confusionrlFull
+```
+Se extraen los true negatives y true positives, así comoo los false negatives y false positive de la matriz de confusión con todas las variables.
+```{r}
+(TNrlFull <- matriz_confusionrlFull["N", "N"])
+(TPrlFull <- matriz_confusionrlFull["P", "P"])
+(FPrlFull <- matriz_confusionrlFull["N", "P"])
+(FNrlFull <- matriz_confusionrlFull["P", "N"])
+```
+
+```{r}
+(exactitudrlFull <- (TPrlFull + TNrlFull)/(TPrlFull + TNrlFull + FPrlFull + FNrlFull))
+(precisionrlFull <- TPrlFull/(TPrlFull + FPrlFull))
+(sensibilidadrlFull <- TPrlFull/(TPrlFull + FNrlFull))
+(F_scorerlFull <- 2 * (precisionrlFull * sensibilidadrlFull)/(precisionrlFull +
+    sensibilidadrlFull))
+(especificidadrlFull <- TNrlFull/(TNrlFull + FPrlFull))
+```
+Curva ROC para la regresión utilizando todas las variables.
+
+```{r}
+#Se calcula las curva de ROC para la base completa
+logist.pred.ROCR <- prediction(predict_numeric, test$diagnosis)
+
+logist.perf <- performance(logist.pred.ROCR, "tpr",
+    "fpr")
+
+plot(logist.perf)
+abline(0, 1, col = "red")
+
+#Integral bajo la curva ROC
+auc <- performance(logist.pred.ROCR, measure = "auc")
+
+auc@y.values
+
+```
+Se utilizan las variables observadas en la literatura para hacer la regresión logística (area, texture, concavity, smoothness):
+```{r}
+fit_rlTeo <- glm(diagnosis ~ area_mean + texture_mean + concavity_mean + smoothness_mean , data = train, family = "binomial" )
+summary(fit_rlTeo)
+```
+```{r}
+#Prediccion para las variables observadas de la literatura
+predict_numeric02 <- predict(fit_rlTeo, newdata= test, type = "response")
+```
+
+```{r}
+predict_02 <- as.numeric(predict_numeric02 >= 0.5)
+
+matriz_confusionrlTeo <- table(test$diagnosis, predict_02)
+
+colnames(matriz_confusionrlTeo) <- c("N", "P")
+rownames(matriz_confusionrlTeo) <- c("N", "P")
+
+matriz_confusionrlTeo
+```
+
+```{r}
+(TNrlTeo <- matriz_confusionrlTeo["N", "N"])
+(TPrlTeo <- matriz_confusionrlTeo["P", "P"])
+(FPrlTeo <- matriz_confusionrlTeo["N", "P"])
+(FNrlTeo <- matriz_confusionrlTeo["P", "N"])
+```
+
+```{r}
+(exactitudrlTeo <- (TPrlTeo + TNrlTeo)/(TPrlTeo + TNrlTeo + FPrlTeo + FNrlTeo))
+(precisionrlTeo <- TPrlTeo/(TPrlTeo + FPrlTeo))
+(sensibilidadrlTeo <- TPrlTeo/(TPrlTeo + FNrlTeo))
+(F_scorerlTeo <- 2 * (precisionrlTeo * sensibilidadrlTeo)/(precisionrlTeo +
+    sensibilidadrlTeo))
+(especificidadrlTeo <- TNrlTeo/(TNrlTeo + FPrlTeo))
+```
+
+```{r}
+#Curva ROC con las 4 variables de la literatura
+logist.pred.ROCR02 <- prediction(predict_numeric02, test$diagnosis)
+
+logist.perf02 <- performance(logist.pred.ROCR02, "tpr",
+    "fpr")
+
+plot(logist.perf02)
+abline(0, 1, col = "red")
+
+#Integral bajo la curva ROC
+auc <- performance(logist.pred.ROCR02, measure = "auc")
+
+auc@y.values
+```
+
+
+Se utilizan las variables observadas en la literatura pero tomando en cuenta el promedio, desviacion estandar y el valor maximo:
+```{r}
+fit_rlTeoFull <- glm(diagnosis ~ area_mean + texture_mean + concavity_mean + smoothness_mean + area_se + texture_se + concavity_se + smoothness_se +area_worst + texture_worst + concavity_worst + smoothness_worst, data = train, family = "binomial" )
+summary(fit_rlTeoFull)
+
+```
+```{r}
+#Prediccion para las variables observadas de la literatura
+predict_numeric02Full <- predict(fit_rlTeoFull, newdata = test, type = "response")
+```
+
+```{r}
+predict_02TeoFull <- as.numeric(predict_numeric02Full >= 0.5)
+
+matriz_confusionTeoFull <- table(test$diagnosis, predict_02TeoFull)
+
+colnames(matriz_confusionTeoFull) <- c("N", "P")
+rownames(matriz_confusionTeoFull) <- c("N", "P")
+
+matriz_confusionTeoFull
+```
+
+```{r}
+(TNTeoFull <- matriz_confusionTeoFull["N", "N"])
+(TPTeoFull <- matriz_confusionTeoFull["P", "P"])
+(FPTeoFull <- matriz_confusionTeoFull["N", "P"])
+(FNTeoFull <- matriz_confusionTeoFull["P", "N"])
+```
+
+```{r}
+(exactitudTeoFull <- (TPTeoFull + TNTeoFull)/(TPTeoFull + TNTeoFull + FPTeoFull + FNTeoFull))
+(precisionTeoFull <- TPTeoFull/(TPTeoFull + FPTeoFull))
+(sensibilidadTeoFull <- TPTeoFull/(TPTeoFull + FNTeoFull))
+(F_scoreTeoFull <- 2 * (precisionTeoFull * sensibilidadTeoFull)/(precisionTeoFull +
+    sensibilidadTeoFull))
+(especificidadTeoFull <- TNTeoFull/(TNTeoFull + FPTeoFull))
+```
+
+```{r}
+#Curva ROC con las 4 variables de la literatura pero con las 3 subvariables
+logist.pred.ROCR02Full <- prediction(predict_numeric02Full, test$diagnosis)
+
+logist.perf02Full <- performance(logist.pred.ROCR02Full, "tpr",
+    "fpr")
+
+plot(logist.perf02Full)
+abline(0, 1, col = "red")
+
+#Integral bajo la curva ROC
+auc <- performance(logist.pred.ROCR02Full, measure = "auc")
+
+auc@y.values
+```
+# ```{r}
+# df <- data.frame(
+#                  FalsePositive=logist.pred.ROCR02Full @x.values[[1]],
+#                  TruePositive=logist.pred.ROCR02Full @y.values[[1]])
+# plt <- ggplot(df, aes(x=FalsePositive, y=TruePositive)) + geom_line(color='blue')+
+#   labs(x = 'Falsos Positivos', y = 'Verdaderos Positivos', title = 'Curva ROC bajo modelo con variables selectas')+
+#   geom_line(data = as.data.frame(cbind(seq(0,1,0.2),seq(0,1,0.2))),aes(x=seq(0,1,0.2), y =seq(0,1,0.2))) +theme_bw()
+# ```
+
+
+
+
+
+Se implementa el metodo KNN:
+
+```{r}
+trainKNN <- train[,-1]
+testKNN <- test[,-1]
+
+train_labels <- as.factor(trainKNN[,1])
+test_labels <- as.factor(testKNN[,1])
+```
+
+
+
+```{r}
+train.kknn(train_labels ~ ., data = trainKNN, kmax = 50)
+```
+```{r}
+pred <- knn(trainKNN,testKNN, cl = train_labels, k = 15)
+```
+
+```{r}
+confusionMatrix(data = pred, reference = test_labels)
+```
+
+
+
